@@ -33,6 +33,7 @@ var MethodList = []string{
 	"2022-blake3-aes-128-gcm",
 	"2022-blake3-aes-256-gcm",
 	"2022-blake3-chacha20-poly1305",
+	"xor",
 }
 
 func init() {
@@ -84,6 +85,14 @@ func NewMethod(ctx context.Context, methodName string, options C.MethodOptions) 
 		}
 		m.keySaltLength = 32
 		m.constructor = chacha20poly1305.New
+	case "xor":
+		if len(m.pskList) > 1 {
+			return nil, ErrNoEIH
+		}
+		m.keySaltLength = len(m.pskList[0])
+		m.constructor = func(key []byte) (cipher.AEAD, error) {
+			return newXorAEAD(key), nil
+		}
 	default:
 		return nil, os.ErrInvalid
 	}
@@ -122,6 +131,9 @@ func NewMethod(ctx context.Context, methodName string, options C.MethodOptions) 
 		if err != nil {
 			return nil, err
 		}
+	case "xor":
+		// XOR UDP: use xorAEAD as udpCipher (nonce-less, no block cipher needed)
+		m.udpCipher = newXorAEAD(m.pskList[0])
 	}
 	return m, nil
 }
