@@ -40,7 +40,8 @@ func NewReader(upstream io.Reader, cipher cipher.AEAD) *Reader {
 }
 
 func (r *Reader) ReadFixedBuffer(pLen int) (*buf.Buffer, error) {
-	buffer := buf.NewSize(pLen + Overhead)
+	overhead := r.cipher.Overhead()
+	buffer := buf.NewSize(pLen + overhead)
 	_, err := buffer.ReadFullFrom(r.reader, buffer.FreeLen())
 	if err != nil {
 		buffer.Release()
@@ -151,7 +152,8 @@ func (r *Reader) WaitReadBuffer() (buffer *buf.Buffer, err error) {
 }
 
 func (r *Reader) readBuffer() (*buf.Buffer, error) {
-	buffer := buf.NewSize(PacketLengthBufferSize + Overhead)
+	overhead := r.cipher.Overhead()
+	buffer := buf.NewSize(PacketLengthBufferSize + overhead)
 	_, err := buffer.ReadFullFrom(r.reader, buffer.FreeLen())
 	if err != nil {
 		buffer.Release()
@@ -165,7 +167,7 @@ func (r *Reader) readBuffer() (*buf.Buffer, error) {
 	increaseNonce(r.nonce)
 	length := int(binary.BigEndian.Uint16(buffer.To(PacketLengthBufferSize)))
 	buffer.Release()
-	buffer = buf.NewSize(length + Overhead)
+	buffer = buf.NewSize(length + overhead)
 	_, err = buffer.ReadFullFrom(r.reader, buffer.FreeLen())
 	if err != nil {
 		buffer.Release()
