@@ -50,6 +50,7 @@ type Method struct {
 	udpBlockDecryptCipher cipher.Block
 	pskList               [][]byte
 	pskHash               []byte
+	isXor                 bool
 }
 
 func NewMethod(ctx context.Context, methodName string, options C.MethodOptions) (C.Method, error) {
@@ -89,6 +90,7 @@ func NewMethod(ctx context.Context, methodName string, options C.MethodOptions) 
 		if len(m.pskList) > 1 {
 			return nil, ErrNoEIH
 		}
+		m.isXor = true
 		m.keySaltLength = len(m.pskList[0])
 		m.constructor = func(key []byte) (cipher.AEAD, error) {
 			return newXorAEAD(key), nil
@@ -477,7 +479,9 @@ func (c *clientPacketConn) WritePacket(buffer *buf.Buffer, destination M.Socksad
 	}
 	if c.method.udpCipher != nil {
 		c.method.udpCipher.Seal(buffer.Index(dataIndex), buffer.To(dataIndex), buffer.From(dataIndex), nil)
-		buffer.Extend(shadowio.Overhead)
+		if !c.method.isXor {
+			buffer.Extend(shadowio.Overhead)
+		}
 	} else {
 		packetHeader := buffer.To(aes.BlockSize)
 		c.session.cipher.Seal(buffer.Index(dataIndex), packetHeader[4:16], buffer.From(dataIndex), nil)
@@ -506,7 +510,9 @@ func (c *clientPacketConn) readPacket(buffer *buf.Buffer) (destination M.Socksad
 			return M.Socksaddr{}, E.Cause(err, "decrypt packet")
 		}
 		buffer.Advance(PacketNonceSize)
-		buffer.Truncate(buffer.Len() - shadowio.Overhead)
+		if !c.method.isXor {
+			buffer.Truncate(buffer.Len() - shadowio.Overhead)
+		}
 	} else {
 		if buffer.Len() < PacketMinimalHeaderSize {
 			return M.Socksaddr{}, C.ErrPacketTooShort
@@ -714,7 +720,9 @@ func (c *clientPacketConn) WriteTo(p []byte, addr net.Addr) (n int, err error) {
 	common.Must1(buffer.Write(p))
 	if c.method.udpCipher != nil {
 		c.method.udpCipher.Seal(buffer.Index(dataIndex), buffer.To(dataIndex), buffer.From(dataIndex), nil)
-		buffer.Extend(shadowio.Overhead)
+		if !c.method.isXor {
+			buffer.Extend(shadowio.Overhead)
+		}
 	} else {
 		packetHeader := buffer.To(aes.BlockSize)
 		c.session.cipher.Seal(buffer.Index(dataIndex), packetHeader[4:16], buffer.From(dataIndex), nil)
@@ -731,7 +739,11 @@ func (c *clientPacketConn) WriteTo(p []byte, addr net.Addr) (n int, err error) {
 func (c *clientPacketConn) FrontHeadroom() int {
 	var overHead int
 	if c.method.udpCipher != nil {
-		overHead = PacketNonceSize + shadowio.Overhead
+		if c.method.isXor {
+			overHead = PacketNonceSize
+		} else {
+			overHead = PacketNonceSize + shadowio.Overhead
+		}
 	} else {
 		overHead = shadowio.Overhead
 	}
@@ -749,6 +761,9 @@ func (c *clientPacketConn) FrontHeadroom() int {
 }
 
 func (c *clientPacketConn) RearHeadroom() int {
+	if c.method.isXor {
+		return 0
+	}
 	return shadowio.Overhead
 }
 
