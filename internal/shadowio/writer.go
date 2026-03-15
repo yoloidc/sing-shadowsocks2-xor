@@ -44,6 +44,7 @@ func (w *Writer) Write(p []byte) (n int, err error) {
 	}
 	w.access.Lock()
 	defer w.access.Unlock()
+	overhead := w.cipher.Overhead()
 	for pLen := len(p); pLen > 0; {
 		var data []byte
 		if pLen > w.maxPacketSize {
@@ -54,14 +55,14 @@ func (w *Writer) Write(p []byte) (n int, err error) {
 			data = p
 			pLen = 0
 		}
-		bufferSize := PacketLengthBufferSize + 2*Overhead + len(data)
+		bufferSize := PacketLengthBufferSize + 2*overhead + len(data)
 		buffer := buf.NewSize(bufferSize)
 		common.Must(binary.Write(buffer, binary.BigEndian, uint16(len(data))))
 		w.cipher.Seal(buffer.Index(0), w.nonce, buffer.To(PacketLengthBufferSize), nil)
 		increaseNonce(w.nonce)
-		buffer.Extend(Overhead)
+		buffer.Extend(overhead)
 		w.cipher.Seal(buffer.Index(buffer.Len()), w.nonce, data, nil)
-		buffer.Extend(len(data) + Overhead)
+		buffer.Extend(len(data) + overhead)
 		increaseNonce(w.nonce)
 		_, err = w.writer.Write(buffer.Bytes())
 		buffer.Release()
@@ -78,15 +79,16 @@ func (w *Writer) WriteBuffer(buffer *buf.Buffer) error {
 		defer buffer.Release()
 		return common.Error(w.Write(buffer.Bytes()))
 	}
+	overhead := w.cipher.Overhead()
 	pLen := buffer.Len()
-	headerOffset := PacketLengthBufferSize + Overhead
+	headerOffset := PacketLengthBufferSize + overhead
 	header := buffer.ExtendHeader(headerOffset)
 	binary.BigEndian.PutUint16(header, uint16(pLen))
 	w.cipher.Seal(header[:0], w.nonce, header[:PacketLengthBufferSize], nil)
 	increaseNonce(w.nonce)
 	w.cipher.Seal(buffer.Index(headerOffset), w.nonce, buffer.From(headerOffset), nil)
 	increaseNonce(w.nonce)
-	buffer.Extend(Overhead)
+	buffer.Extend(overhead)
 	return w.writer.WriteBuffer(buffer)
 }
 
